@@ -32,7 +32,10 @@ def evaluate(net, X, A_norm, y, mask):
 
     Returns a tuple of (loss, accuracy).
     """
-    raise NotImplementedError
+    scores = net.loss(X, A_norm)
+    loss, _ = masked_softmax_loss(scores, y, mask)
+    acc = masked_accuracy(scores, y, mask)
+    return loss, acc
 
 
 def train(X, A_norm, y, train_mask, cfg: TrainConfig, val_mask=None, verbose=True):
@@ -49,6 +52,52 @@ def train(X, A_norm, y, train_mask, cfg: TrainConfig, val_mask=None, verbose=Tru
     """
     num_features = X.shape[1]
     num_classes = int(y.max()) + 1
-    raise NotImplementedError
 
-    # return net, history
+    net = GraphNet(num_features, num_classes, cfg.hidden_dim, cfg.num_layers,
+                   cfg.layer_type, cfg.aggregator, cfg.seed)
+    if cfg.optimizer == "adam":
+        optim_func = adam
+    elif cfg.optimizer == "sgd":
+        optim_func = sgd
+    elif cfg.optimizer == "sgd_momentum":
+        optim_func = sgd_momentum
+    else:
+        raise ValueError(f"Unknown optimizer {cfg.optimizer}")
+
+    history = {"train_loss": [], "train_acc": []}
+    if val_mask is not None:
+        history["val_loss"] = []
+        history["val_acc"] = []
+
+    optim_configs = {
+        name: {"learning_rate": cfg.lr}
+        for name in net.params
+    }
+    for epoch in range(cfg.epochs):
+        loss, grads = net.loss(X, A_norm, y, train_mask)
+        for name, param in net.params.items():
+            if name.startswith("W"):
+                grads[name] += cfg.weight_decay * param
+            net.params[name], optim_configs[name] = optim_func(
+                param, grads[name], optim_configs[name]
+            )
+
+        train_loss, train_acc = evaluate(net, X, A_norm, y, train_mask)
+        history["train_loss"].append(train_loss)
+        history["train_acc"].append(train_acc)
+
+        if val_mask is not None:
+            val_loss, val_acc = evaluate(net, X, A_norm, y, val_mask)
+            history["val_loss"].append(val_loss)
+            history["val_acc"].append(val_acc)
+
+        if verbose:
+            message = (
+                f"Epoch {epoch + 1}/{cfg.epochs} "
+                f"train_loss={train_loss:.4f} train_acc={train_acc:.4f}"
+            )
+            if val_mask is not None:
+                message += f" val_loss={val_loss:.4f} val_acc={val_acc:.4f}"
+            print(message)
+
+    return net, history

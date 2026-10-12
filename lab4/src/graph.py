@@ -16,7 +16,12 @@ def make_adjacency(num_nodes, edges):
     Returns:
     - A: (N, N) float64 array with entries in {0, 1}, zero diagonal
     """
-    raise NotImplementedError
+    A = np.zeros((num_nodes, num_nodes), dtype=np.float64)
+    for i, j in edges:
+        if i != j:
+            A[i, j] = 1
+            A[j, i] = 1
+    return A
 
 
 def add_self_loops(A):
@@ -29,7 +34,9 @@ def add_self_loops(A):
     Returns a new array of the same shape.
     """
     N = A.shape[0]
-    raise NotImplementedError
+    A_tilde = A.copy()
+    A_tilde[np.arange(N), np.arange(N)] = 1
+    return A_tilde
 
 
 def degree_vector(A):
@@ -38,7 +45,7 @@ def degree_vector(A):
     Returns:
     - d: (N,) float64
     """
-    raise NotImplementedError
+    return np.sum(A, axis=1)
 
 
 def row_normalize(A):
@@ -49,7 +56,10 @@ def row_normalize(A):
 
     Returns a new (N, N) float64 array.
     """
-    raise NotImplementedError
+    d = degree_vector(A)
+    d_inv = np.zeros_like(d)
+    d_inv[d > 0] = 1.0 / d[d > 0]
+    return d_inv[:, None] * A
 
 
 def symmetric_normalize(A):
@@ -61,7 +71,10 @@ def symmetric_normalize(A):
 
     Returns a new (N, N) float64 array.
     """
-    raise NotImplementedError
+    d = degree_vector(A)
+    d_inv_sqrt = np.zeros_like(d)
+    d_inv_sqrt[d > 0] = 1.0 / np.sqrt(d[d > 0])
+    return d_inv_sqrt[:, None] * A * d_inv_sqrt[None, :]
 
 
 def graph_laplacian(A):
@@ -75,7 +88,9 @@ def graph_laplacian(A):
 
     Returns a new (N, N) float64 array.
     """
-    raise NotImplementedError
+    d = degree_vector(A)
+    D = np.diag(d)
+    return D - A
 
 
 def dirichlet_energy(X, A):
@@ -95,7 +110,8 @@ def dirichlet_energy(X, A):
 
     Returns a float >= 0.
     """
-    raise NotImplementedError
+    L = graph_laplacian(A)
+    return np.trace(X.T @ L @ X)
 
 
 def propagate(A_norm, X, k):
@@ -113,4 +129,8 @@ def propagate(A_norm, X, k):
 
     Returns an (N, F) array.
     """
-    raise NotImplementedError
+    out = X.copy()
+    for _ in range(k):
+        out = A_norm @ out
+    return out
+    

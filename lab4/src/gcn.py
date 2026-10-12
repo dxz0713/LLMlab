@@ -19,9 +19,9 @@ def aggregate(A_norm, X):
     - H_agg: (N, F_in)
     - cache: (A_norm, X)
     """
-    raise NotImplementedError
-
-    # return H_agg, (A_norm, X)
+    H_agg = A_norm @ X
+    cache = (A_norm, X)
+    return H_agg, cache
 
 
 def aggregate_backward(dH_agg, cache):
@@ -38,9 +38,9 @@ def aggregate_backward(dH_agg, cache):
     Returns:
     - dX: (N, F_in)
     """
-    A_norm, _ = cache
-    raise NotImplementedError
-
+    A_norm, X = cache
+    dX = A_norm.T @ dH_agg
+    return dX
 
 def graph_conv_forward_naive(A_norm, X, W, b):
     """Direct graph convolution with explicit loops. Slow but obviously correct.
@@ -62,9 +62,13 @@ def graph_conv_forward_naive(A_norm, X, W, b):
     """
     N, F_in = X.shape
     F_out = W.shape[1]
-    raise NotImplementedError
-
-    # return out, (A_norm, X, W, b)
+    out = np.zeros((N, F_out), dtype=X.dtype)
+    for i in range(N):
+        for j in range(N):
+            if A_norm[i, j] != 0:
+                out[i] += A_norm[i, j] * (X[j] @ W)
+        out[i] += b
+    return out, (A_norm, X, W, b)
 
 
 def graph_conv_forward(A_norm, X, W, b):
@@ -78,9 +82,10 @@ def graph_conv_forward(A_norm, X, W, b):
     - out: (N, F_out)
     - cache: (A_norm, X, W, b, H_agg)
     """
-    raise NotImplementedError
-
-    # return out, (A_norm, X, W, b, H_agg)
+    H_agg = A_norm @ X
+    out = H_agg @ W + b
+    cache = (A_norm, X, W, b, H_agg)
+    return out, cache
 
 
 def graph_conv_backward(dout, cache):
@@ -101,4 +106,7 @@ def graph_conv_backward(dout, cache):
     - db: (F_out,)
     """
     A_norm, X, W, b, H_agg = cache
-    raise NotImplementedError
+    dX = A_norm.T @ (dout @ W.T)
+    dW = H_agg.T @ dout
+    db = np.sum(dout, axis=0)
+    return dX, dW, db

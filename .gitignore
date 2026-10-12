@@ -17,3 +17,9 @@ __MACOSX/
 lab2/data/cifar10_mindspore/
 
 .vscode/
+
+# lab4 environment, dataset, and generated outputs
+lab4/.venv/
+lab4/.pytest_cache/
+lab4/data/
+lab4/outputs/

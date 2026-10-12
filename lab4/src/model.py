@@ -29,7 +29,12 @@ def masked_softmax_loss(scores, y, mask):
     - loss: float, averaged over the masked nodes
     - dscores: (N, C), exactly zero on rows where mask is False
     """
-    raise NotImplementedError
+    scores_m = scores[mask]
+    y_m = y[mask]
+    loss, dscores_m = softmax_loss(scores_m, y_m)
+    dscores = np.zeros_like(scores)
+    dscores[mask] = dscores_m
+    return loss, dscores
 
 
 def masked_accuracy(scores, y, mask):
@@ -42,7 +47,10 @@ def masked_accuracy(scores, y, mask):
 
     Returns a float in [0, 1].
     """
-    raise NotImplementedError
+    if mask.sum() == 0:
+        return 0.0
+    pred = np.argmax(scores[mask], axis=1)
+    return np.mean(pred == y[mask])
 
 
 class GraphNet:
@@ -96,20 +104,28 @@ class GraphNet:
     def _conv(self, X, A_norm, idx):
         """One graph convolution (GCN or SAGE, per self.layer_type)."""
         W, b = self.params[f"W{idx}"], self.params[f"b{idx}"]
-        raise NotImplementedError
+        if self.layer_type == "gcn":
+            return graph_conv_forward(A_norm, X, W, b)
+        elif self.layer_type == "sage":
+            return sage_conv_forward(A_norm, X, W, b, self.aggregator)
 
     def _conv_backward(self, dout, cache):
-        raise NotImplementedError
+        if self.layer_type == "gcn":
+            return graph_conv_backward(dout, cache)
+        elif self.layer_type == "sage":
+            return sage_conv_backward(dout, cache)
 
     def _conv_relu(self, X, A_norm, idx):
         """One graph-conv-relu block. Returns (out, (conv_cache, relu_cache))."""
-        raise NotImplementedError
+        out, conv_cache = self._conv(X, A_norm, idx)
+        out, relu_cache = relu_forward(out)
+        return out, (conv_cache, relu_cache)
 
     def _conv_relu_backward(self, dout, caches):
         """Backward of one graph-conv-relu block. Returns (dX, dW, db)."""
         conv_cache, relu_cache = caches
-        raise NotImplementedError
-
+        dconv = relu_backward(dout, relu_cache)
+        return self._conv_backward(dconv, conv_cache)
     # ------------------------------------------------------------ fwd / bwd
 
     def loss(self, X, A_norm, y=None, mask=None):
@@ -126,7 +142,21 @@ class GraphNet:
         - scores (N, num_classes) if y is None
         - (loss, grads) otherwise, grads keyed like params
         """
-        raise NotImplementedError
+        cache = []
+        H = X
+        for idx in range(self.num_layers - 1):
+            H, c = self._conv_relu(H, A_norm, idx)
+            cache.append(c)
+
+        last_idx = self.num_layers - 1
+        scores, last_cache = self._conv(H, A_norm, last_idx)
+
+        if y is None:
+            return scores
+
+        loss, dscores = masked_softmax_loss(scores, y, mask)
+        grads = self._backward(dscores, cache, last_cache)
+        return loss, grads
 
     def _backward(self, dscores, caches, last_cache):
         """Backward pass through the entire network.
@@ -134,8 +164,19 @@ class GraphNet:
         Returns a dict mapping every parameter name to its gradient,
         keyed like self.params.
         """
-        raise NotImplementedError
+        grads = {}
+        dH, dW, db = self._conv_backward(dscores, last_cache)
+        grads[f"W{self.num_layers - 1}"] = dW
+        grads[f"b{self.num_layers - 1}"] = db
+
+        for idx in reversed(range(self.num_layers - 1)):
+            dH, dW, db = self._conv_relu_backward(dH, caches[idx])
+            grads[f"W{idx}"] = dW
+            grads[f"b{idx}"] = db
+
+        return grads
 
     def predict(self, X, A_norm):
         """Predicted class label of every node, shape (N,)."""
-        raise NotImplementedError
+        scores = self.loss(X, A_norm)
+        return np.argmax(scores, axis=1)

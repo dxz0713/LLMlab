@@ -21,7 +21,13 @@ def max_aggregate(A, X):
     - H_agg: (N, F)
     - cache: (A, X)
     """
-    raise NotImplementedError
+    H_agg = np.zeros_like(X)
+    for i in range(A.shape[0]):
+        neighbors = np.where(A[i] > 0)[0]
+        if len(neighbors) > 0:
+            H_agg[i] = np.max(X[neighbors], axis=0)
+    cache = (A, X)
+    return H_agg, cache
 
 
 def max_aggregate_backward(dH_agg, cache):
@@ -39,7 +45,19 @@ def max_aggregate_backward(dH_agg, cache):
     - dX: (N, F)
     """
     A, X = cache
-    raise NotImplementedError
+    N, F = X.shape
+    dX = np.zeros_like(X, dtype=np.float64)
+    for i in range(N):
+        nbrs = np.where(A[i] > 0)[0]
+        if len(nbrs) == 0:
+            continue
+        vals = X[nbrs]          # (deg, F)
+        max_vals = vals.max(axis=0)  # (F,)
+        for c in range(F):
+            mask = vals[:, c] == max_vals[c]
+            count = mask.sum()
+            dX[nbrs[mask], c] += dH_agg[i, c] / count
+    return dX
 
 
 def sage_conv_forward(A_adj, X, W, b, aggregator="mean"):
@@ -63,7 +81,16 @@ def sage_conv_forward(A_adj, X, W, b, aggregator="mean"):
     - out: (N, F_out)
     - cache: (A_adj, X, W, b, H_agg, agg_cache, aggregator)
     """
-    raise NotImplementedError
+    if aggregator == "mean":
+        H_agg, agg_cache = aggregate(A_adj, X)
+    elif aggregator == "max":
+        H_agg, agg_cache = max_aggregate(A_adj, X)
+    else:
+        raise ValueError(f"Unknown aggregator: {aggregator}")
+
+    out = np.concatenate([X, H_agg], axis=1) @ W + b
+    cache = (A_adj, X, W, b, H_agg, agg_cache, aggregator)
+    return out, cache
 
 
 def sage_conv_backward(dout, cache):
@@ -80,4 +107,20 @@ def sage_conv_backward(dout, cache):
     """
     A_adj, X, W, b, H_agg, agg_cache, aggregator = cache
     F_in = X.shape[1]
-    raise NotImplementedError
+
+    dW = np.concatenate([X, H_agg], axis=1).T @ dout
+    db = dout.sum(axis=0)
+    dH = dout @ W.T
+
+    dX_self = dH[:, :F_in]
+    dH_agg = dH[:, F_in:]
+
+    if aggregator == "mean":
+        dX_agg = aggregate_backward(dH_agg, agg_cache)
+    elif aggregator == "max":
+        dX_agg = max_aggregate_backward(dH_agg, agg_cache)
+    else:
+        raise ValueError(f"Unknown aggregator: {aggregator}")
+
+    dX = dX_self + dX_agg
+    return dX, dW, db
