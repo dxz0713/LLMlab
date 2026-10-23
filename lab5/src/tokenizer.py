@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from collections import Counter
 
+import numpy as np
+
 # A byte-level BPE vocabulary always starts from the 256 possible byte values.
 NUM_BYTES = 256
 
@@ -90,7 +92,16 @@ class BPETokenizer:
         Returns:
             A new list of token ids with the pair merged throughout.
         """
-        raise NotImplementedError
+        merged: list[int] = []
+        i = 0
+        while i < len(ids):
+            if i + 1 < len(ids) and (ids[i], ids[i + 1]) == pair:
+                merged.append(new_id)
+                i += 2
+            else:
+                merged.append(ids[i])
+                i += 1
+        return merged
 
     def train(self, text: str, vocab_size: int, allowed_special: frozenset = frozenset()) -> None:
         """Learn merge rules from ``text`` until the vocabulary is full.
@@ -113,7 +124,27 @@ class BPETokenizer:
             ValueError: if ``vocab_size`` is too small to hold the bytes and
                 the requested special tokens.
         """
-        raise NotImplementedError
+        if vocab_size < NUM_BYTES + len(allowed_special):
+            raise ValueError(
+                f"vocab_size {vocab_size} is too small for {len(allowed_special)} special tokens"
+            )
+        # Special tokens sit at the very end of the vocabulary, so merges may
+        # only use ids up to (but not including) this first reserved id.
+        special_start = vocab_size - len(allowed_special)
+        self.special_tokens = {
+            s: i for i, s in enumerate(sorted(allowed_special), start=special_start)
+        }
+        self.inverse_special_tokens = {i: s for s, i in self.special_tokens.items()}
+        ids = list(text.encode("utf-8"))
+        while len(self.vocab) < special_start:
+            stats = self._pair_stats(ids)
+            if not stats:
+                break
+            pair = self._most_frequent_pair(stats)
+            new_id = len(self.vocab)
+            self.vocab[new_id] = self.vocab[pair[0]] + self.vocab[pair[1]]
+            self.merges[pair] = new_id
+            ids = self._merge(ids, pair, new_id)
 
     def _encode_ordinary(self, text: str) -> list[int]:
         """Encode text that is known to contain no special tokens.
@@ -130,7 +161,17 @@ class BPETokenizer:
         Returns:
             The list of token ids.
         """
-        raise NotImplementedError
+        ids = list(text.encode("utf-8"))
+        while True:
+            pairs = [(ids[i], ids[i + 1]) for i in range(len(ids) - 1)]
+            merge_candidates = [(pair, self.merges[pair]) for pair in pairs if pair in self.merges]
+            if not merge_candidates:
+                break
+            # Find the pair with the lowest new_id (earliest learned)
+            pair_to_merge, _ = min(merge_candidates, key=lambda x: x[1])
+            new_id = self.merges[pair_to_merge]
+            ids = self._merge(ids, pair_to_merge, new_id)
+        return ids
 
     # -- given: special-token dispatch and decoding ----------------------
 
@@ -211,7 +252,18 @@ def sliding_window(token_ids, max_length: int, stride: int):
         ValueError: if the token sequence is not longer than ``max_length``,
             so not even one window fits.
     """
-    raise NotImplementedError
+    if len(token_ids) <= max_length:
+        raise ValueError("token sequence must be longer than max_length")
+
+    inputs: list = []
+    targets: list = []
+    for s in range(0, len(token_ids) - max_length, stride):
+        inputs.append(token_ids[s : s + max_length])
+        targets.append(token_ids[s + 1 : s + max_length + 1])
+    return (
+        np.array(inputs, dtype=np.int64),
+        np.array(targets, dtype=np.int64),
+    )
 
 
 def compression_ratio(text: str, tokenizer) -> float:

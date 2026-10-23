@@ -38,7 +38,10 @@ class LayerNorm:
             The normalized array, same shape as ``x``. With default
             ``scale``/``shift`` each position has mean ~0 and variance ~1.
         """
-        raise NotImplementedError
+        mean = x.mean(axis=-1, keepdims=True)
+        var = x.var(axis=-1, keepdims=True)
+        x_norm = (x - mean) / np.sqrt(var + self.eps)
+        return x_norm * self.scale + self.shift
 
     __call__ = forward
 
@@ -57,7 +60,7 @@ def gelu(x: Array) -> Array:
         ``0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x**3)))``,
         applied elementwise.
     """
-    raise NotImplementedError
+    return 0.5 * x * (1 + np.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * x**3)))
 
 
 class FeedForward:
@@ -98,7 +101,7 @@ class FeedForward:
         Returns:
             An array of the same shape as ``x``.
         """
-        raise NotImplementedError
+        return gelu(x @ self.W1 + self.b1) @ self.W2 + self.b2
 
     __call__ = forward
 
@@ -148,6 +151,8 @@ class TransformerBlock:
             An array of the same shape; a transformer block never changes the
             shape, it only refines the per-position representations.
         """
-        raise NotImplementedError
+        x = x + self.att(self.norm1(x))
+        x = x + self.ff(self.norm2(x))
+        return x
 
     __call__ = forward

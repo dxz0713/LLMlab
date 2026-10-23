@@ -22,7 +22,9 @@ def softmax(x: Array, axis: int = -1) -> Array:
         An array of the same shape whose slices along ``axis`` are non-negative
         and sum to 1.
     """
-    raise NotImplementedError
+    m = np.max(x, axis=axis, keepdims=True)
+    e = np.exp(x - m)
+    return e / np.sum(e, axis=axis, keepdims=True)
 
 
 def causal_mask(seq_len: int) -> Array:
@@ -40,7 +42,7 @@ def causal_mask(seq_len: int) -> Array:
         A ``(seq_len, seq_len)`` array; entry ``[i, j]`` is ``-inf`` when
         ``j > i`` else ``0``.
     """
-    raise NotImplementedError
+    return np.triu(np.full((seq_len, seq_len), -np.inf), k=1)
 
 
 def scaled_dot_product_attention(
@@ -65,7 +67,12 @@ def scaled_dot_product_attention(
         ``(..., seq_q, d_v)``; ``weights`` has shape ``(..., seq_q, seq_k)``
         and its last axis sums to 1 (each query's distribution over keys).
     """
-    raise NotImplementedError
+    score = q @ k.swapaxes(-1, -2) / np.sqrt(q.shape[-1])
+    if mask is not None:
+        score += mask
+    weights = softmax(score, axis=-1)
+    context = weights @ v
+    return context, weights
 
 
 def _attention_dropout(weights: Array, rate: float, training: bool, rng: np.random.RandomState) -> Array:
@@ -164,7 +171,22 @@ class MultiHeadAttention:
             The output array of shape ``(batch, seq_len, d_out)``, or the pair
             ``(output, weights)`` when ``return_weights`` is True.
         """
-        raise NotImplementedError
+        q = x @ self.W_query
+        k = x @ self.W_key
+        v = x @ self.W_value
+        batch, seq_len, _ = x.shape
+        if seq_len > self.context_length:
+            raise ValueError(f"seq_len={seq_len} exceeds context_length={self.context_length}")
+        q = q.reshape(batch, seq_len, self.num_heads, self.head_dim).swapaxes(1, 2)  # (batch, num_heads, seq_len, head_dim)
+        k = k.reshape(batch, seq_len, self.num_heads, self.head_dim).swapaxes(1, 2)
+        v = v.reshape(batch, seq_len, self.num_heads, self.head_dim).swapaxes(1, 2)
+        mask = causal_mask(seq_len)[None, None, :, :]  # (1, 1, seq_len, seq_len)
+        context, weights = scaled_dot_product_attention(q, k, v, mask)
+        context = context.swapaxes(1, 2).reshape(batch, seq_len, self.d_out)
+        output = context @ self.out_proj
+        if return_weights:
+            return output, weights
+        return output
 
     __call__ = forward
 
@@ -217,4 +239,15 @@ def apply_rope(x: Array, cos: Array, sin: Array) -> Array:
     Returns:
         The rotated array, same shape as ``x``.
     """
-    raise NotImplementedError
+    seq_len = x.shape[-2]
+    if cos.shape[0] < seq_len or sin.shape[0] < seq_len:
+        raise ValueError(f"cos/sin tables have length {cos.shape[0]} but x has seq_len={seq_len}")
+    if cos.shape[1] != x.shape[-1] or sin.shape[1] != x.shape[-1]:
+        raise ValueError(f"cos/sin tables have head_dim={cos.shape[1]} but x has head_dim={x.shape[-1]}")
+    # The tables duplicate the head_dim//2 angles into both halves, so the
+    # first half of cos/sin is the angle for *every* rotated pair.
+    half = x.shape[-1] // 2
+    cos = cos[:seq_len, :half]
+    sin = sin[:seq_len, :half]
+    x1, x2 = np.split(x, 2, axis=-1)
+    return np.concatenate([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1)
