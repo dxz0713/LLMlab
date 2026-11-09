@@ -17,12 +17,16 @@ def discriminator_loss(
     Inputs are logits; do not apply sigmoid before calling this function.
     """
 
-    # TODO: validate real_label and sum the real/fake BCE-with-logits terms.
-    raise NotImplementedError
+    if not (0.0 < real_label <= 1.0):
+        raise ValueError("real_label must be in the range (0, 1]")
+    real_t = torch.full_like(real_logits, real_label)
+    fake_t = torch.zeros_like(fake_logits)
+    real_loss = F.binary_cross_entropy_with_logits(real_logits, real_t)
+    fake_loss = F.binary_cross_entropy_with_logits(fake_logits, fake_t)
+    return real_loss + fake_loss
 
 
 def generator_loss(fake_logits: torch.Tensor) -> torch.Tensor:
     """Non-saturating generator loss: make generated samples look real."""
 
-    # TODO: implement the non-saturating generator objective.
-    raise NotImplementedError
+    return F.binary_cross_entropy_with_logits(fake_logits, torch.ones_like(fake_logits))

@@ -23,3 +23,9 @@ lab4/.venv/
 lab4/.pytest_cache/
 lab4/data/
 lab4/outputs/
+
+# lab6 environment, dataset, and generated outputs
+lab6/lab6-student/.venv/
+lab6/lab6-student/.pytest_cache/
+lab6/lab6-student/data/
+lab6/lab6-student/outputs/

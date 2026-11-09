@@ -18,7 +18,6 @@ def sample_noise(
 ) -> torch.Tensor:
     """Sample standard-normal latent vectors with shape ``(N, z_dim)``."""
 
-    # TODO: validate sizes and sample standard-normal latent vectors.
     if batch_size <= 0:
         raise ValueError("batch_size must be a positive integer")
     if z_dim <= 0:
@@ -29,8 +28,8 @@ def sample_noise(
 def set_requires_grad(module: nn.Module, enabled: bool) -> None:
     """Enable or disable gradient accumulation for every module parameter."""
 
-    # TODO: set requires_grad for every parameter.
-    raise NotImplementedError
+    for param in module.parameters():
+        param.requires_grad = enabled
 
 
 def discriminator_step(
@@ -44,8 +43,26 @@ def discriminator_step(
 ) -> dict[str, float]:
     """Update D once while treating generated images as constants."""
 
-    # TODO: update D only. Generated images must not create gradients for G.
-    raise NotImplementedError
+    generator.train()
+    discriminator.train()
+    if z is None:
+        z = sample_noise(real_images.shape[0], z_dim, real_images.device)
+
+    optimizer_d.zero_grad(set_to_none=True)
+    with torch.no_grad():
+        fake_images = generator(z)
+
+    real_logits = discriminator(real_images)
+    fake_logits = discriminator(fake_images)
+    loss = discriminator_loss(real_logits, fake_logits, real_label)
+    loss.backward()
+    optimizer_d.step()
+
+    with torch.no_grad():
+        d_real = torch.sigmoid(real_logits).mean().item()
+        d_fake = torch.sigmoid(fake_logits).mean().item()
+
+    return {"d_loss": loss.item(), "d_real": d_real, "d_fake": d_fake}
 
 
 def generator_step(
@@ -59,8 +76,26 @@ def generator_step(
 ) -> tuple[dict[str, float], torch.Tensor]:
     """Update G once while using D only as a differentiable scoring function."""
 
-    # TODO: freeze D parameters, update G through D, restore D, detach samples.
-    raise NotImplementedError
+    generator.train()
+    discriminator.train()
+    set_requires_grad(discriminator, False)
+    optimizer_g.zero_grad(set_to_none=True)
+
+    if z is None:
+        z = sample_noise(batch_size, z_dim, device)
+
+    fake_images = generator(z)
+    fake_logits = discriminator(fake_images)
+    loss = generator_loss(fake_logits)
+    loss.backward()
+    optimizer_g.step()
+
+    set_requires_grad(discriminator, True)
+
+    with torch.no_grad():
+        g_score = torch.sigmoid(fake_logits).mean().item()
+
+    return {"g_loss": loss.item(), "g_score": g_score}, fake_images.detach()
 
 
 def train_one_epoch(
@@ -76,5 +111,26 @@ def train_one_epoch(
 ) -> dict[str, float]:
     """Run alternating D/G updates and return batch-averaged statistics."""
 
-    # TODO: alternate D/G updates and return batch-averaged statistics.
-    raise NotImplementedError
+    sum_stats = {"d_loss": 0.0, "d_real": 0.0, "d_fake": 0.0, "g_loss": 0.0, "g_score": 0.0}
+    n = 0
+
+    for batch in loader:
+        if max_batches is not None and n >= max_batches:
+            break
+
+        real_images = batch[0].to(device)
+        d_stats = discriminator_step(generator, discriminator, real_images, optimizer_d, z_dim, real_label)
+        g_stats, _ = generator_step(generator, discriminator, real_images.shape[0], optimizer_g, z_dim, device)
+
+        for key in sum_stats:
+            sum_stats[key] += d_stats.get(key, 0.0) + g_stats.get(key, 0.0)
+
+        n += 1
+
+    if n == 0:
+        raise ValueError("loader produced no batches")
+
+    for key in sum_stats:
+        sum_stats[key] /= n
+
+    return sum_stats
